@@ -281,7 +281,7 @@ class DataLoader:
 
 
 
-    def batchify(self, pretrain=False):
+    def batchify(self):
         """ Make a batch of frames and senones """
 
         batch_index = 0
@@ -303,9 +303,7 @@ class DataLoader:
                     for i in self.indexes[start:end]), axis = 0)
                 batch['clean'] = np.squeeze(batch['clean'])
 
-            if pretrain:
-                batch['label'] = batch['clean']
-            elif self.senone_file is not None:
+            if self.senone_file is not None:
                 batch['label'] = self.senone_buffer[self.indexes[start:end]]
 
             # Increment batch, and if necessary re-fill buffer
