@@ -96,6 +96,7 @@ class Dropnet():
 
     def __init__(self,
         inputs,
+        output_size, 
         filters    = [128, 128, 256, 256],
         fc_layers  = 2,
         fc_nodes   = 2048,
@@ -110,6 +111,8 @@ class Dropnet():
         ----------
         inputs : Placeholder
             Spectral inputs to this model, of the shape (batchsize, frames, frequencies)
+        output_size : int
+            Size of the output
         filters : list of ints
             Size of each block
         fc_layers : int
@@ -146,5 +149,5 @@ class Dropnet():
                 fc = tf.layers.dense(fc, fc_nodes, activation)
                 fc = tf.layers.dropout(fc, rate=dropout, training=training)
 
-        self.output = tf.layers.dense(fc, shape[-1])
+        self.output = tf.layers.dense(fc, output_size)
 

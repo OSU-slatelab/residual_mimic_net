@@ -23,6 +23,7 @@ if __name__ == "__main__":
     parser.add_argument("--fc_layers", default=2, type=int)
     parser.add_argument("--dropout", default=0.3, type=float)
     parser.add_argument("--context", default=5, type=int)
+    parser.add_argument("--frequencies", default=257, type=int)
 
     # Training params
     parser.add_argument("--batch_size", default=256, type=int)
@@ -53,18 +54,19 @@ if __name__ == "__main__":
         shuffle = False,
     )
 
-    in_frames = tf.placeholder(tf.float32, shape=(None, 2*args.context + 1, 257))
-    out_frames = tf.placeholder(tf.float32, shape=(None, 257))
+    in_frames = tf.placeholder(tf.float32, shape=(None, 2*args.context + 1, args.frequencies))
+    out_frames = tf.placeholder(tf.float32, shape=(None, args.frequencies))
     training = tf.placeholder(tf.bool)
 
     dropnet = Dropnet(
-        inputs     = in_frames,
-        filters    = args.filters,
-        fc_layers  = args.fc_layers,
-        fc_nodes   = args.fc_nodes,
-        activation = tf.nn.relu,
-        dropout    = args.dropout,
-        training   = training,
+        inputs      = in_frames,
+        output_size = args.frequencies,
+        filters     = args.filters,
+        fc_layers   = args.fc_layers,
+        fc_nodes    = args.fc_nodes,
+        activation  = tf.nn.relu,
+        dropout     = args.dropout,
+        training    = training,
     )
 
     loss = tf.losses.mean_squared_error(out_frames, dropnet.output)
