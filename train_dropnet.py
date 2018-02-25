@@ -33,43 +33,44 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     train_loader = DataLoader(
-        base_dir = args.base_dir,
-        in_frame_file = "data-spectrogram/train_si84_delta_noisy_global_normalized/feats.scp.mod",
-        out_frame_file = "data-spectrogram/train_si84_clean_global_normalized/feats.scp.mod",
-        batch_size = args.batch_size,
+        base_dir    = args.base_dir,
+        frame_file  = args.noisy_train_file,
+        clean_file  = args.clean_train_file,
+        batch_size  = args.batch_size,
         buffer_size = args.buffer_size,
-        context = args.context,
-        out_frame_count = 1,
-        shuffle = True,
+        context     = args.context,
+        out_frames  = 1,
+        shuffle     = True,
     )
 
     dev_loader = DataLoader(
-        base_dir = args.base_dir,
-        in_frame_file = "data-spectrogram/dev_dt_05_delta_noisy_global_normalized/feats.scp.mod",
-        out_frame_file = "data-spectrogram/dev_dt_05_clean_global_normalized/feats.scp.mod",
-        batch_size = args.batch_size,
+        base_dir    = args.base_dir,
+        frame_file  = args.noisy_dev_file,
+        clean_file  = args.clean_dev_file,
+        batch_size  = args.batch_size,
         buffer_size = args.buffer_size,
-        context = args.context,
-        out_frame_count = 1,
-        shuffle = False,
+        context     = args.context,
+        out_frames  = 1,
+        shuffle     = False,
     )
 
-    in_frames = tf.placeholder(tf.float32, shape=(None, 2*args.context + 1, args.frequencies))
-    out_frames = tf.placeholder(tf.float32, shape=(None, args.frequencies))
+    noisy_frames = tf.placeholder(tf.float32, shape=(None, 2*args.context + 1, args.frequencies))
+    clean_frames = tf.placeholder(tf.float32, shape=(None, args.frequencies))
     training = tf.placeholder(tf.bool)
 
-    dropnet = Dropnet(
-        inputs      = in_frames,
-        output_size = args.frequencies,
-        filters     = args.filters,
-        fc_layers   = args.fc_layers,
-        fc_nodes    = args.fc_nodes,
-        activation  = tf.nn.relu,
-        dropout     = args.dropout,
-        training    = training,
-    )
+    with tf.variable_scope('actor'):
+        dropnet = Dropnet(
+            inputs      = noisy_frames,
+            output_size = args.frequencies,
+            filters     = args.filters,
+            fc_layers   = args.fc_layers,
+            fc_nodes    = args.fc_nodes,
+            activation  = tf.nn.relu,
+            dropout     = args.dropout,
+            training    = training,
+        )
 
-    loss = tf.losses.mean_squared_error(out_frames, dropnet.output)
+    loss = tf.losses.mean_squared_error(clean_frames, dropnet.output)
     global_step = tf.Variable(0, trainable=False)
     learning_rate = tf.train.inverse_time_decay(args.learn_rate, global_step, 1, args.lr_decay)
     train = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step)
@@ -87,18 +88,20 @@ if __name__ == "__main__":
 
             train_loss = 0
             count = 0
-            for in_frame_batch, out_frame_batch in train_loader.batchify(shuffle_batches=False,include_deltas=False):
-                fd = {in_frames: in_frame_batch, out_frames: out_frame_batch, training: True}
+            for batch in train_loader.batchify():
+                noisy, clean = batch['frame'], batch['clean']
+                fd = {noisy_frames: noisy, clean_frames: clean, training: True}
                 batch_loss, _ = sess.run([loss, train], fd)
                 train_loss += batch_loss
                 count += 1
 
-            print("\nTrain loss:", train_loss / count)
+            print("Train loss:", train_loss / count)
 
             test_loss = 0
             count = 0
-            for in_frame_batch, out_frame_batch in dev_loader.batchify(include_deltas=False):
-                fd = {in_frames: in_frame_batch, out_frames: out_frame_batch, training: False}
+            for batch in dev_loader.batchify():
+                noisy, clean = batch['frame'], batch['clean']
+                fd = {noisy_frames: noisy, clean_frames: clean, training: False}
                 test_loss += sess.run(loss, fd)
                 count += 1
 
@@ -107,4 +110,4 @@ if __name__ == "__main__":
             print("Test loss:", test_loss)
 
             if test_loss < min_loss and args.save_dir:
-                saver.save(sess, os.path.join(args.save_dir, "model-{0}.ckpt".format(test_loss)))
+                saver.save(sess, os.path.join(args.save_dir, "model-%.4f.ckpt" % test_loss))
