@@ -3,7 +3,7 @@ import argparse
 import os
 
 from data_io import DataLoader
-from dropnet import Dropnet
+from resnet import ResNet
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -28,38 +28,41 @@ if __name__ == "__main__":
     # Training params
     parser.add_argument("--batch_size", default=256, type=int)
     parser.add_argument("--buffer_size", default=40, type=int)
-    parser.add_argument("--learn_rate", default=1e-4, type=float)
-    parser.add_argument("--lr_decay", default=1e-6, type=float)
+    parser.add_argument("--learn_rate", default=0.0001, type=float)
+    parser.add_argument("--lr_decay", default=0.95, type=float)
     args = parser.parse_args()
 
+    # Training data dataloader
     train_loader = DataLoader(
-        base_dir    = args.base_dir,
-        frame_file  = args.noisy_train_file,
-        clean_file  = args.clean_train_file,
-        batch_size  = args.batch_size,
-        buffer_size = args.buffer_size,
-        context     = args.context,
-        out_frames  = 1,
-        shuffle     = True,
+        base_dir        = args.base_dir,
+        in_frame_file   = args.noisy_train_file,
+        out_frame_file  = args.clean_train_file,
+        batch_size      = args.batch_size,
+        buffer_size     = args.buffer_size,
+        context         = args.context,
+        out_frame_count = 1,
+        shuffle         = True,
     )
 
+    # Development set dataloader
     dev_loader = DataLoader(
-        base_dir    = args.base_dir,
-        frame_file  = args.noisy_dev_file,
-        clean_file  = args.clean_dev_file,
-        batch_size  = args.batch_size,
-        buffer_size = args.buffer_size,
-        context     = args.context,
-        out_frames  = 1,
-        shuffle     = False,
+        base_dir        = args.base_dir,
+        in_frame_file   = args.noisy_dev_file,
+        out_frame_file  = args.clean_dev_file,
+        batch_size      = args.batch_size,
+        buffer_size     = args.buffer_size,
+        context         = args.context,
+        out_frame_count = 1,
+        shuffle         = False,
     )
 
+    # Placeholder for noisy data and clean labels
     noisy_frames = tf.placeholder(tf.float32, shape=(None, 2*args.context + 1, args.frequencies))
     clean_frames = tf.placeholder(tf.float32, shape=(None, args.frequencies))
-    training = tf.placeholder(tf.bool)
 
+    # Build the model
     with tf.variable_scope('actor'):
-        dropnet = Dropnet(
+        resnet = ResNet(
             inputs      = noisy_frames,
             output_size = args.frequencies,
             filters     = args.filters,
@@ -67,12 +70,12 @@ if __name__ == "__main__":
             fc_nodes    = args.fc_nodes,
             activation  = tf.nn.relu,
             dropout     = args.dropout,
-            training    = training,
         )
 
-    loss = tf.losses.mean_squared_error(clean_frames, dropnet.output)
+    # Optimizer
+    loss = tf.losses.mean_squared_error(clean_frames, resnet.output)
     global_step = tf.Variable(0, trainable=False)
-    learning_rate = tf.train.inverse_time_decay(args.learn_rate, global_step, 1, args.lr_decay)
+    learning_rate = tf.train.exponential_decay(args.learn_rate, global_step, 1e4, args.lr_decay)
     train = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step)
 
     with tf.Session() as sess:
@@ -88,9 +91,9 @@ if __name__ == "__main__":
 
             train_loss = 0
             count = 0
-            for batch in train_loader.batchify():
-                noisy, clean = batch['frame'], batch['clean']
-                fd = {noisy_frames: noisy, clean_frames: clean, training: True}
+            for noisy, clean in train_loader.batchify():
+                noisy = noisy[:,:,:257]
+                fd = {noisy_frames: noisy, clean_frames: clean, resnet.training: True}
                 batch_loss, _ = sess.run([loss, train], fd)
                 train_loss += batch_loss
                 count += 1
@@ -99,9 +102,9 @@ if __name__ == "__main__":
 
             test_loss = 0
             count = 0
-            for batch in dev_loader.batchify():
-                noisy, clean = batch['frame'], batch['clean']
-                fd = {noisy_frames: noisy, clean_frames: clean, training: False}
+            for noisy, clean in dev_loader.batchify():
+                noisy = noisy[:,:,:257]
+                fd = {noisy_frames: noisy, clean_frames: clean, resnet.training: False}
                 test_loss += sess.run(loss, fd)
                 count += 1
 
