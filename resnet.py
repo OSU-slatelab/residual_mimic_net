@@ -41,6 +41,7 @@ class ResNet():
         """
 
         # Store hyperparameters
+        self.inputs = inputs
         self.activation = activation
         self.dropout = dropout
         self.training = tf.placeholder(tf.bool)
@@ -64,7 +65,7 @@ class ResNet():
                 fc = tf.layers.dense(fc, fc_nodes, activation)
                 fc = tf.layers.dropout(fc, rate=dropout, training=self.training)
 
-        self.output = tf.layers.dense(fc, output_size)
+        self.outputs = tf.layers.dense(fc, output_size)
 
 
     def conv_layer(self, inputs, filters, downsample=False):
@@ -86,17 +87,8 @@ class ResNet():
             outputs of convolutional layer
         """
 
-        # DO dropout and pre-activation if we're not downsampling
+        # DO pre-activation if we're not downsampling
         if not downsample:
-        
-            # Dropout
-            inputs = tf.layers.dropout(
-                inputs      = inputs,
-                rate        = self.dropout,
-                training    = self.training,
-            )
-
-            # Activate
             inputs = self.activation(inputs)
 
         # Apply convolution
@@ -110,7 +102,16 @@ class ResNet():
             kernel_regularizer = tf.contrib.layers.l2_regularizer(0.0001),
         )
 
-        return layer
+        # Dropout
+        shape = tf.shape(layer)
+        dropped = tf.layers.dropout(
+            inputs      = layer,
+            rate        = self.dropout,
+            training    = self.training,
+            noise_shape = [shape[0], filters, 1, 1],
+        )
+
+        return layer, dropped
 
 
     def conv_block(self, inputs, filters):
@@ -135,15 +136,15 @@ class ResNet():
         
         # Down-sample layer
         with tf.variable_scope("downsample"):
-            reduced = self.conv_layer(inputs, filters, downsample=True)
+            reduced, dropped = self.conv_layer(inputs, filters, downsample=True)
 
         # 1st conv layer
         with tf.variable_scope("conv1"):
-            conv1 = self.conv_layer(reduced, filters)
+            _, conv1 = self.conv_layer(dropped, filters)
 
         # 2nd conv layer
         with tf.variable_scope("conv2"):
-            conv2 = self.conv_layer(conv1, filters)
+            _, conv2 = self.conv_layer(conv1, filters)
 
         return reduced + conv2
 
