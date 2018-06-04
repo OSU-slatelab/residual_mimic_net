@@ -23,9 +23,9 @@ class Trainer:
     def __init__(self,
         critic,
         learn_rate = 1e-4,
-        lr_decay   = 0,
+        lr_decay   = 1.,
         max_norm   = 5.0,
-        alpha      = 1,
+        alpha      = 0.1,
         actor      = None,
         teacher    = None,
     ):
@@ -67,7 +67,7 @@ class Trainer:
         # Training actor
         else:
             self.inputs = actor.inputs
-            self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='dropnet')
+            self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor')
             self.training = actor.training
             
             self.feed_dict[critic.training] = False
@@ -80,12 +80,12 @@ class Trainer:
             predictions = critic.outputs
 
             loss = tf.losses.mean_squared_error(labels=labels, predictions=predictions)
-            self.mimic_loss = tf.reduce_mean(loss)
+            self.mimic_loss = tf.reduce_mean(loss) * alpha
 
             loss = tf.losses.mean_squared_error(labels=self.clean, predictions=actor.outputs)
             self.fidelity_loss = tf.reduce_mean(loss)
 
-            self.loss = alpha * self.mimic_loss + self.fidelity_loss
+            self.loss = 0.5 * (self.mimic_loss + self.fidelity_loss)
 
         self.learn_rate = learn_rate
         self.lr_decay = lr_decay
@@ -100,7 +100,7 @@ class Trainer:
         grads, _ = tf.clip_by_global_norm(grads, clip_norm=self.max_norm)
         grad_var_pairs = zip(grads, self.var_list)
         global_step = tf.Variable(0, trainable=False)
-        learning_rate = tf.train.inverse_time_decay(self.learn_rate, global_step, 1, self.lr_decay)
+        learning_rate = tf.train.exponential_decay(self.learn_rate, global_step, 1e4, self.lr_decay)
         optim = tf.train.AdamOptimizer(learning_rate)
         self.train = optim.apply_gradients(grad_var_pairs, global_step=global_step)
 
@@ -114,10 +114,10 @@ class Trainer:
         self.feed_dict[self.training] = training
 
         # Iterate dataset
-        for batch in loader.batchify():
+        for batch in loader.batchify(include_deltas=False):
 
             self.feed_dict[self.inputs] = batch['frame']
-            self.feed_dict[self.labels] = batch['label']
+            #self.feed_dict[self.labels] = batch['label']
 
             # Count the frames in the batch
             batch_frames = batch['frame'].shape[0]
@@ -127,8 +127,6 @@ class Trainer:
 
             # If we're combining mse and critic loss, report both independently
             if not self.critic_train:
-                self.feed_dict[self.mse_weight] = self.current_mse_weight
-
                 ops = [self.fidelity_loss, self.mimic_loss, self.loss]
 
                 if training:
@@ -138,7 +136,7 @@ class Trainer:
 
                 tot_fidelity_loss += batch_frames * fidelity_loss
                 tot_mimic_loss += batch_frames * mimic_loss
-            
+
             # Just critic loss
             elif training:
                 batch_loss, _ = sess.run([self.loss, self.train], feed_dict = self.feed_dict)
@@ -149,7 +147,7 @@ class Trainer:
 
             # Update the progressbar
             frames += batch_frames
-            update_progressbar(frames / loader.frame_count)
+            #update_progressbar(frames / loader.frame_count)
 
         # Compute loss
         losses = {'avg_loss': float(tot_loss) / frames}
