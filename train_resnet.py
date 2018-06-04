@@ -73,7 +73,7 @@ if __name__ == "__main__":
         )
 
     # Optimizer
-    loss = tf.losses.mean_squared_error(clean_frames, resnet.output)
+    loss = tf.losses.mean_squared_error(clean_frames, resnet.outputs)
     global_step = tf.Variable(0, trainable=False)
     learning_rate = tf.train.exponential_decay(args.learn_rate, global_step, 1e4, args.lr_decay)
     train = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step)
@@ -113,4 +113,5 @@ if __name__ == "__main__":
             print("Test loss:", test_loss)
 
             if test_loss < min_loss and args.save_dir:
-                saver.save(sess, os.path.join(args.save_dir, "model-%.4f.ckpt" % test_loss))
+                min_loss = test_loss
+                saver.save(sess, os.path.join(args.save_dir, "model-%.4f.ckpt" % test_loss), global_step=epoch)
