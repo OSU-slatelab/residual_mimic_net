@@ -1,5 +1,69 @@
+#!/u/drspeech/opt/anaconda3/bin/python3
+
+"""
+Critic model for actor-critic noisy speech recognition.
+
+Author: Deblin Bagchi and Peter Plantinga
+Date:   Fall 2017
+"""
+
 import tensorflow as tf
-from dropnet import Dropnet
+
+def lrelu(x, a):
+    """ Leaky ReLU activation function """
+    with tf.name_scope("lrelu"):
+        # adding these together creates the leak part and linear part
+        # then cancels them out by subtracting/adding an absolute value term
+        # leak: a*x/2 - a*abs(x)/2
+        # linear: x/2 + abs(x)/2
+
+        # this block looks like it has 2 inputs on the graph unless we do this
+        x = tf.identity(x)
+        return (0.5 * (1 + a)) * x + (0.5 * (1 - a)) * tf.abs(x)
+
+
+def batch_norm(x, shape, training, decay = 0.999, epsilon = 1e-3):
+    """ Batch Norm for controlling batch statistics """
+    #Assume 2d [batch, values] tensor
+    beta = tf.get_variable(name='beta', shape=shape[-1], initializer=tf.constant_initializer(0.0)
+                               , trainable=True)
+    gamma = tf.get_variable(name='gamma', shape=shape[-1], initializer=tf.random_normal_initializer(1.0, 0.02),
+                                trainable=True)
+    pop_mean = tf.get_variable('pop_mean',
+                               shape[-1],
+                               initializer=tf.constant_initializer(0.0),
+                               trainable=False)
+    pop_var = tf.get_variable('pop_var',
+                              shape[-1],
+                              initializer=tf.constant_initializer(1.0),
+                              trainable=False)
+    batch_mean, batch_var = tf.nn.moments(x, [0])
+
+    train_mean_op = tf.assign(pop_mean, pop_mean * decay + batch_mean * (1 - decay))
+    train_var_op = tf.assign(pop_var, pop_var * decay + batch_var * (1 - decay))
+
+    def batch_statistics():
+        with tf.control_dependencies([train_mean_op, train_var_op]):
+            return tf.nn.batch_normalization(x, batch_mean, batch_var, beta, gamma, epsilon)
+
+    def population_statistics():
+        return tf.nn.batch_normalization(x, pop_mean, pop_var, beta, gamma, epsilon)
+
+    return tf.cond(training, batch_statistics, population_statistics)
+
+def feedforward_layer(inputs, shape):
+    """ Simple feedforward layer """
+
+    weight = tf.get_variable("weight",
+        shape,
+        dtype=tf.float32,
+        initializer = tf.random_normal_initializer(0,0.02))
+
+    bias = tf.get_variable("bias",
+        shape[-1],
+        initializer=tf.zeros_initializer())
+
+    return tf.matmul(inputs, weight) + bias
 
 class Critic:
     """
@@ -12,48 +76,83 @@ class Critic:
 
     def __init__(self,
             inputs,
+            layer_size  = 1024,
+            layers      = 7,
+            block_size  = 0,
             output_size = 1999,
-            filters     = [128, 128, 256, 256],
-            fc_layers   = 2,
-            fc_nodes    = 2048,
-            activation  = tf.nn.relu,
-            dropout     = 0.3):
+            dropout     = 0.5,
+            context     = 5,    
+        ):
         """
         Create critic model.
 
-        Parameters
-        ----------
-        inputs : Tensor
+        Params:
+         * inputs : Tensor
             The input placeholder or tensor from actor
-        output_size : int
+         * layer_size : int
+            The size of the DNN layers
+         * layers : int
+            Number of layers
+         * block_size : int
+            Number of layers in residual block, 0 for no residual connection
+         * output_size : int
             Number of classes to output
-        filters : list
-            The number of filters in each block
-        fc_layers : int
-            Number of fully-connected hidden layers
-        fc_nodes : int
-            Number of units per fully connected hidden layer
-        activation : function
-            Function to apply to each layer as an activation
-        dropout : float
-            Proportion of filters and units to drop at train time
+         * dropout : float
+            Proportion of neurons to drop
         """
 
-        # Placeholders
         self.inputs = inputs
+        self.context = context
+        
+        # Layer params
+        self.dropout = dropout
+        self.layer_size = layer_size
+        self.layers = layers
+        self.block_size = block_size
+        self.output_size = output_size
+        self.layer_outputs = []
+        
+        # Placeholders
         self.training = tf.placeholder(dtype = tf.bool, name = "training")
         self.labels = tf.placeholder(dtype = tf.float32, shape = (None, output_size), name = "labels")
 
-        self.dropnet = Dropnet(
-            inputs      = inputs,
-            output_size = output_size,
-            filters     = filters,
-            fc_layers   = fc_layers,
-            fc_nodes    = fc_nodes,
-            activation  = activation,
-            dropout     = dropout,
-        )
+        self._create_model()
 
-        self.outputs = self.dropnet.output
+    def _create_model(self):
+        """ Put together all the parts of the critic model. """
 
+        inputs = tf.stack([self.inputs[i:-(2*self.context-i)] for i in range(2*self.context)] + [self.inputs[2*self.context:]])
+        inputs = tf.transpose(inputs, [1, 0, 2])
+
+        # Flatten
+        #input_shape = self.inputs.get_shape().as_list()
+        #flat_len = input_shape[1] * input_shape[2]
+        #inputs = tf.reshape(self.inputs, (-1, flat_len))
+
+        # NEW
+        inputs = tf.contrib.layers.flatten(inputs)
+        hidden = tf.layers.dropout(inputs, self.dropout, training = self.training)
+
+        #with tf.variable_scope("hidden0"):
+        #        hidden = feedforward_layer(inputs, (flat_len, self.layer_size))
+        #        self.layer_outputs.append(hidden)
+        #        hidden = lrelu(hidden, 0.3)
+        #        #hidden = tf.contrib.layers.batch_norm(hidden, is_training=self.training, updates_collections=None)
+        #        #hidden = lrelu(hidden, 0.3)
+        #        #hidden = tf.layers.dropout(hidden, self.dropout, training = self.training)
+        
+        #for i in range(1, self.layers):
+        for i in range(0, self.layers):
+            with tf.variable_scope("hidden%d" % i):
+                #hidden = feedforward_layer(hidden, (self.layer_size, self.layer_size))
+                hidden = tf.layers.dense(hidden, self.layer_size)
+                self.layer_outputs.append(hidden)
+                #hidden = lrelu(hidden, 0.3)
+                #hidden = batch_norm(hidden, (self.layer_size, self.layer_size), self.training)
+                hidden = tf.contrib.layers.batch_norm(hidden, is_training=self.training, updates_collections=None)
+                hidden = lrelu(hidden, 0.3)
+                hidden = tf.layers.dropout(hidden, self.dropout, training = self.training)
+
+        with tf.variable_scope('output'):
+            self.outputs = feedforward_layer(hidden, (self.layer_size, self.output_size))
 

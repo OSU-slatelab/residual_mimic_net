@@ -216,7 +216,7 @@ class DataLoader:
         self.in_frame_buffer = in_frames
         self.out_frame_buffer = out_frames
 
-    def batchify(self, shuffle_batches=False, include_deltas=True):
+    def batchify(self, shuffle_batches=False, include_deltas=False):
         """ Make a batch of frames and senones """
 
         batch_index = 0
@@ -227,23 +227,32 @@ class DataLoader:
             end = min((batch_index+1) * self.batch_size, self.out_frame_buffer.shape[0])
 
             # Collect the data 
-            in_frame_batch = np.stack((self.in_frame_buffer[i:i+self.out_frame_count+2*self.context,]
-                for i in self.indexes[start:end]), axis = 0)
+            try:
+                in_frame_batch = np.stack((self.in_frame_buffer[i:i+self.out_frame_count+2*self.context,]
+                    for i in self.indexes[start:end]), axis = 0)
 
-            out_frame_batch = np.stack((self.out_frame_buffer[i:i+self.out_frame_count,]
-                for i in self.indexes[start:end]), axis = 0).squeeze()
+                out_frame_batch = np.stack((self.out_frame_buffer[i:i+self.out_frame_count,]
+                    for i in self.indexes[start:end]), axis = 0).squeeze()
 
-            # Increment batch, and if necessary re-fill buffer
-            batch_index += 1
-            if batch_index * self.batch_size >= self.out_frame_buffer.shape[0]:
-                batch_index = 0
-                self._fill_buffer()
+                # Increment batch, and if necessary re-fill buffer
+                batch_index += 1
+                if batch_index * self.batch_size >= self.out_frame_buffer.shape[0]:
+                    batch_index = 0
+                    self._fill_buffer()
 
-            if include_deltas:
-                yield in_frame_batch, out_frame_batch
-            else:
-                yield in_frame_batch[:,:,:257], out_frame_batch
+                if include_deltas:
+                    yield in_frame_batch, out_frame_batch
+                else:
+                    yield in_frame_batch[:,:,:257], out_frame_batch
 
+            except:
+                print("Empty array...")
+
+                # Increment batch, and if necessary re-fill buffer
+                batch_index += 1
+                if batch_index * self.batch_size >= self.out_frame_buffer.shape[0]:
+                    batch_index = 0
+                    self._fill_buffer()
 
     def reset(self, shuffle_batches):
         self.uid = 0

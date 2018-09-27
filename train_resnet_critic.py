@@ -2,8 +2,8 @@ import tensorflow as tf
 import argparse
 import os
 
-from critic_model import Critic
-from data_io import DataLoader
+from resnet import ResNet
+from data_io_old import DataLoader
 from trainer import Trainer
 
 def run_training(a):
@@ -19,7 +19,7 @@ def run_training(a):
 
         # Define our critic model
         with tf.variable_scope('critic'):
-            critic = Critic(
+            critic = ResNet(
                 inputs      = frame_placeholder,
                 output_size = a.senones,
                 filters     = a.filters,
@@ -27,6 +27,8 @@ def run_training(a):
                 fc_nodes    = a.fc_nodes,
                 dropout     = a.dropout,
             )
+
+        critic.labels = tf.placeholder(tf.float32, shape=(None, a.senones), name = "labels")
 
         # Create loader for train data
         train_loader = DataLoader(
@@ -54,7 +56,7 @@ def run_training(a):
 
         # Class for training
         with tf.variable_scope('trainer'):
-            trainer = Trainer(critic, learn_rate=a.learn_rate, lr_decay=a.lr_decay, a.max_global_norm, alpha=0.1)
+            trainer = Trainer(critic, learn_rate=a.learn_rate, lr_decay=a.lr_decay, max_norm=a.max_global_norm)
 
         # Save all variables
         saver = tf.train.Saver()
@@ -69,7 +71,9 @@ def run_training(a):
         for epoch in range(1, 200):
             print('Epoch %d' % epoch)
 
+            #print(sess.run(trainer.learning_rate))
             loss, duration = trainer.run_ops(sess, train_loader, training = True)
+            #print(sess.run(trainer.learning_rate))
             train_loss = loss['avg_loss']
             print ('\nTrain loss: %.6f (%.3f sec)' % (train_loss, duration))
 
@@ -95,7 +99,7 @@ def main():
 
     # Training
     parser.add_argument("--learn_rate", type=float, default=1e-4, help="initial learning rate")
-    parser.add_argument("--lr_decay", type=float, default=1e-6, help="learning rate decay")
+    parser.add_argument("--lr_decay", type=float, default=0.95, help="learning rate decay")
     parser.add_argument("--max_global_norm", type=float, default=5.0, help="global max norm for clipping")
     parser.add_argument("--dropout", type=float, default=0.3, help="fraction of filters and neurons to drop")
     parser.add_argument("--buffer_size", default=10, type=int)

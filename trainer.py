@@ -28,6 +28,7 @@ class Trainer:
         alpha      = 0.1,
         actor      = None,
         teacher    = None,
+        lengths    = False,
     ):
         """ 
         Parameters
@@ -53,6 +54,7 @@ class Trainer:
 
         # Whether we're training critic or not
         self.critic_train = actor is None
+        self.lengths = lengths
 
         # Actor is none if we're training critic
         if actor is None:
@@ -73,8 +75,13 @@ class Trainer:
             self.feed_dict[critic.training] = False
             self.feed_dict[teacher.training] = False
 
+            if lengths:
+                self.length1 = critic.length
+                self.length2 = teacher.length
+
             self.clean = teacher.inputs
-            self.labels = critic.labels
+            predicted = critic.inputs
+            #self.labels = critic.labels
             
             labels = teacher.outputs
             predictions = critic.outputs
@@ -82,7 +89,7 @@ class Trainer:
             loss = tf.losses.mean_squared_error(labels=labels, predictions=predictions)
             self.mimic_loss = tf.reduce_mean(loss) * alpha
 
-            loss = tf.losses.mean_squared_error(labels=self.clean, predictions=actor.outputs)
+            loss = tf.losses.mean_squared_error(labels=self.clean, predictions=predicted)
             self.fidelity_loss = tf.reduce_mean(loss)
 
             self.loss = 0.5 * (self.mimic_loss + self.fidelity_loss)
@@ -100,8 +107,8 @@ class Trainer:
         grads, _ = tf.clip_by_global_norm(grads, clip_norm=self.max_norm)
         grad_var_pairs = zip(grads, self.var_list)
         global_step = tf.Variable(0, trainable=False)
-        learning_rate = tf.train.exponential_decay(self.learn_rate, global_step, 1e4, self.lr_decay)
-        optim = tf.train.AdamOptimizer(learning_rate)
+        self.learning_rate = tf.train.exponential_decay(self.learn_rate, global_step, 1e4, self.lr_decay)
+        optim = tf.train.AdamOptimizer(self.learning_rate)
         self.train = optim.apply_gradients(grad_var_pairs, global_step=global_step)
 
     def run_ops(self, sess, loader, training = True):
@@ -114,13 +121,17 @@ class Trainer:
         self.feed_dict[self.training] = training
 
         # Iterate dataset
-        for batch in loader.batchify(include_deltas=False):
+        for batch in loader.batchify():
 
             self.feed_dict[self.inputs] = batch['frame']
-            #self.feed_dict[self.labels] = batch['label']
+            if self.critic_train:
+                self.feed_dict[self.labels] = batch['label']
 
             # Count the frames in the batch
             batch_frames = batch['frame'].shape[0]
+            if self.lengths:
+                self.feed_dict[self.length1] = [batch_frames]
+                self.feed_dict[self.length2] = [batch_frames]
 
             if self.clean is not None:
                 self.feed_dict[self.clean] = batch['clean']
