@@ -68,7 +68,7 @@ class ResNet():
         self.outputs = tf.layers.dense(fc, output_size)
 
 
-    def conv_layer(self, inputs, filters, downsample=False):
+    def conv_layer(self, inputs, filters, downsample=False, dropout=True):
         """
         One convolutional layer, with convolutional dropout.
 
@@ -87,10 +87,6 @@ class ResNet():
             outputs of convolutional layer
         """
 
-        # DO pre-activation if we're not downsampling
-        if not downsample:
-            inputs = self.activation(inputs)
-
         # Apply convolution
         layer = tf.layers.conv2d(
             inputs      = inputs,
@@ -99,19 +95,21 @@ class ResNet():
             strides     = 2 if downsample else 1,
             padding     = 'same',
             data_format = 'channels_first',
+            activation  = self.activation if not downsample else None,
             kernel_regularizer = tf.contrib.layers.l2_regularizer(0.0001),
         )
 
         # Dropout
-        shape = tf.shape(layer)
-        dropped = tf.layers.dropout(
-            inputs      = layer,
-            rate        = self.dropout,
-            training    = self.training,
-            noise_shape = [shape[0], filters, 1, 1],
-        )
+        if dropout:
+            shape = tf.shape(layer)
+            layer = tf.layers.dropout(
+                inputs      = layer,
+                rate        = self.dropout,
+                training    = self.training,
+                noise_shape = [shape[0], filters, 1, 1],
+            )
 
-        return layer, dropped
+        return layer
 
 
     def conv_block(self, inputs, filters):
@@ -136,16 +134,16 @@ class ResNet():
         
         # Down-sample layer
         with tf.variable_scope("downsample"):
-            reduced, dropped = self.conv_layer(inputs, filters, downsample=True)
+            downsampled = self.conv_layer(inputs, filters, downsample=True)
 
         # 1st conv layer
         with tf.variable_scope("conv1"):
-            _, conv1 = self.conv_layer(dropped, filters)
+            conv1 = self.conv_layer(self.activation(downsampled), filters)
 
         # 2nd conv layer
         with tf.variable_scope("conv2"):
-            _, conv2 = self.conv_layer(conv1, filters)
+            conv2 = self.conv_layer(conv1, filters, dropout=False)
 
-        return reduced + conv2
+        return downsampled + conv2
 
 
